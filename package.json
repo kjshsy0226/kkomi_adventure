@@ -1,0 +1,20 @@
+{
+  "name": "kkomi-viewer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Flutter Web 빌드를 Electron으로 감싸서 Windows 실행/설치 파일을 만드는 뷰어",
+  "main": "electron/main.js",
+  "author": "Jiseong Kim",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build:web": "flutter build web --release --base-href / --pwa-strategy=none",
+    "postbuild:web": "node scripts/patch-base.js && mkdir -p electron/build && cp -R build/web electron/build/web",
+    "dev": "npm run build:web && npx electron .",
+    "pack:win": "npm run build:web && electron-builder --win dir",
+    "dist:win": "npm run build:web && electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^38.4.0",
+    "electron-builder": "^24.13.3"
+  }
+}

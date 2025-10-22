@@ -1,0 +1,28 @@
+appId: com.yourcompany.kkomi
+productName: Kkomi Viewer
+directories:
+  output: dist
+  buildResources: electron/assets
+files:
+  - electron/main.js
+  - electron/preload.js
+  - electron/assets/**
+  - from: electron/build/web
+    to: app/web
+extraResources:
+  - from: electron/build/web
+    to: app/web
+asar: true
+
+win:
+  target:
+    - nsis # 설치기(.exe) — 필요 없으면 dir 로만 빌드 가능
+  artifactName: "Kkomi-Setup-${version}.exe"
+  icon: electron/assets/icon.png
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
