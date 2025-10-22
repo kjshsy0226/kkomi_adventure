@@ -67,6 +67,7 @@ flutter:
     - assets/images/fruits/
     - assets/images/fruits/center/
     - assets/images/fruits/options/
+    - assets/images/fruits/answer/
     - assets/images/kkomi/
     - assets/images/kkomi/base/
     - assets/images/kkomi/success/
