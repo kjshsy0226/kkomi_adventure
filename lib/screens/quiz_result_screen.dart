@@ -1,4 +1,6 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'splash_screen.dart';
 
@@ -10,9 +12,10 @@ class QuizResultScreen extends StatefulWidget {
 }
 
 class _QuizResultScreenState extends State<QuizResultScreen> {
-  late final VideoPlayerController _controller;
+  late final VideoPlayerController _c;
   bool _inited = false;
   bool _navigating = false;
+  String? _error;
 
   late final VoidCallback _onTick;
 
@@ -20,54 +23,59 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
   void initState() {
     super.initState();
 
-    _controller = VideoPlayerController.asset('assets/videos/result.mp4')
+    _c = VideoPlayerController.asset('assets/videos/result.mp4')
       ..setLooping(false);
 
     _onTick = () {
-      if (!_controller.value.isInitialized) return;
+      if (!_c.value.isInitialized) return;
+      final v = _c.value;
 
-      final v = _controller.value;
-
-      // 에러 발생 시: 그대로 멈추고 사용자 탭 기다림
-      if (v.hasError) {
-        _controller.pause();
-        return;
+      if (v.hasError && _error == null) {
+        _error = v.errorDescription ?? 'Video error';
+        _c.pause();
       }
 
-      // 종료 조건: 재생이 멈췄고, position >= duration (약간의 오차 허용)
-      if (!v.isPlaying) {
-        final dur = v.duration;
-        final pos = v.position;
-        if (pos >= dur - const Duration(milliseconds: 50)) {
-          // 마지막 프레임에서 정지 유지
-          _controller.pause();
-        }
+      // 끝나면 마지막 프레임에서 정지 유지 (자동 이동 없음)
+      if (!v.isPlaying && v.isInitialized && v.position >= v.duration) {
+        _c.pause();
       }
 
       if (mounted) setState(() {});
     };
 
-    _controller
-        .initialize()
-        .then((_) {
-          if (!mounted) return;
-          _controller.addListener(_onTick);
-          _inited = true;
-          setState(() {});
+    _initialize();
+  }
 
-          // 자동 재생
-          _controller.play();
-        })
-        .catchError((_) {
-          // 초기화 실패시에도 UI는 뜨고, 탭하여 처음으로 돌아갈 수 있게
-          if (mounted) setState(() {});
-        });
+  Future<void> _initialize() async {
+    try {
+      await _c.initialize();
+      if (!mounted) return;
+
+      _c.addListener(_onTick);
+
+      // 첫 프레임 보장: 짧게 play → 즉시 pause
+      await _c.play();
+      await _c.pause();
+
+      setState(() {
+        _inited = true;
+      });
+
+      // 결과 화면은 자동 재생
+      await _c.play();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = '$e';
+        _inited = false;
+      });
+    }
   }
 
   @override
   void dispose() {
-    _controller.removeListener(_onTick);
-    _controller.dispose();
+    _c.removeListener(_onTick);
+    _c.dispose();
     super.dispose();
   }
 
@@ -86,38 +94,99 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
     );
   }
 
+  // Flutter 3.18+ 키 이벤트 API
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent) {
+      final k = event.logicalKey;
+      if (k == LogicalKeyboardKey.enter ||
+          k == LogicalKeyboardKey.numpadEnter ||
+          k == LogicalKeyboardKey.space) {
+        _backToSplash();
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final ready = _inited && _controller.value.isInitialized;
+    final ready = _inited && _c.value.isInitialized && _error == null;
 
     return GestureDetector(
       onTap: _backToSplash, // 탭하면 처음으로
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (ready)
-              FittedBox(
-                fit: BoxFit.cover,
-                child: SizedBox(
-                  width: _controller.value.size.width,
-                  height: _controller.value.size.height,
-                  child: VideoPlayer(_controller),
+      child: Focus(
+        autofocus: true,
+        onKeyEvent: _onKeyEvent,
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (ready)
+                FittedBox(
+                  fit: BoxFit.cover,
+                  child: SizedBox(
+                    width: _c.value.size.width,
+                    height: _c.value.size.height,
+                    child: VideoPlayer(_c),
+                  ),
+                )
+              else
+                Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.black, Color(0xFF101016)],
+                    ),
+                  ),
+                  child: Center(
+                    child: _error == null
+                        ? const CircularProgressIndicator()
+                        : Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: const [
+                              Icon(
+                                Icons.error_outline,
+                                color: Colors.white70,
+                                size: 36,
+                              ),
+                              SizedBox(height: 12),
+                              Text(
+                                '결과 영상을 불러올 수 없어요.\n탭 또는 Enter로 처음으로 돌아갑니다.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
                 ),
-              )
-            else
-              const Center(child: CircularProgressIndicator()),
 
-            const Positioned(
-              right: 16,
-              bottom: 24,
-              child: Text(
-                '탭하여 처음으로',
-                style: TextStyle(color: Colors.white70, fontSize: 14),
+              const Positioned(
+                right: 16,
+                bottom: 24,
+                child: Text(
+                  '탭 또는 Enter로 처음으로',
+                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                ),
               ),
-            ),
-          ],
+
+              if (_error != null && Platform.isWindows)
+                const Positioned(
+                  left: 16,
+                  bottom: 24,
+                  right: 16,
+                  child: Text(
+                    '힌트: Windows 배포 시 MP4(H.264 + AAC) 권장.\n'
+                    '다른 코덱/컨테이너는 재생이 안 될 수 있어요.',
+                    style: TextStyle(color: Colors.white38, fontSize: 12),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

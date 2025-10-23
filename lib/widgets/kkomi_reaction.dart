@@ -45,8 +45,8 @@ class KkomiReaction extends StatefulWidget {
 
     // 무드별 프레임 수
     this.baseFrameCount = 100, // 000~099
-    this.successFrameCount = 24, // 000~023
-    this.failureFrameCount = 24, // 000~023
+    this.successFrameCount = 48, // 000~047
+    this.failureFrameCount = 48, // 000~047
     // 이미지 경로 프리픽스
     this.basePrefix = 'assets/images/kkomi/base/kkomi_base_',
     this.successPrefix = 'assets/images/kkomi/success/kkomi_success_',

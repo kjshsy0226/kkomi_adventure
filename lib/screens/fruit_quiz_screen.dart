@@ -17,7 +17,7 @@ class FruitQuizScreen extends StatefulWidget {
     this.randomize = true,
     this.autoNext = true,
     this.nextDelay = const Duration(milliseconds: 900),
-    this.answerHold = const Duration(milliseconds: 900),
+    this.answerHold = const Duration(milliseconds: 1800),
   });
 
   final bool randomize;
@@ -215,6 +215,7 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
 
     if (correct) {
       if (!widget.autoNext) {
+        // 자동 넘김 모드가 아니면 성공 리액션만 재생 후 대기
         await _kkomiCtrl.playSuccess();
         return;
       }
@@ -222,17 +223,27 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
       _waitingNext = true;
       setState(() {});
 
-      // 1) 꼬미 success
-      await _kkomiCtrl.playSuccess();
-      if (!mounted) return;
+      try {
+        // ✅ 1) 성공 리액션 + 2) 정답 오버레이를 동시에 시작
+        final successF = _kkomiCtrl.playSuccess(); // 끝날 때까지의 Future
+        final overlayF = _centerCtrl.showAnswer(
+          widget.answerHold,
+        ); // 정답 캡션 홀드 Future
 
-      // 2) 같은 위젯에서 정답 오버레이
-      await _centerCtrl.showAnswer(widget.answerHold);
+        // 둘 다 완료될 때까지 기다림
+        await Future.wait([successF, overlayF]);
+        if (!mounted) return;
 
-      if (!mounted) return;
-      _waitingNext = false;
-      setState(() {});
-      _next();
+        _waitingNext = false;
+        setState(() {});
+        _next();
+      } catch (_) {
+        // 에러가 나도 앱이 막히지 않도록 방어
+        if (!mounted) return;
+        _waitingNext = false;
+        setState(() {});
+        _next();
+      }
     } else {
       _kkomiCtrl.playFailure();
     }
@@ -281,7 +292,21 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
                   fps: 24,
                 ),
 
-                // 2) 타이틀
+                // 2) 중앙 과일 + 샤인 + (내장)정답 오버레이
+                CenterFruitWithShine(
+                  fruit: _answer,
+                  controller: _centerCtrl,
+                  framesBasePath: 'assets/images/quiz/effects/shine_seq/shine_',
+                  frameDigits: 3,
+                  frameCount: 5,
+                  fps: 12,
+                  repeats: 3,
+                  autoplay: true,
+                  fxDuration: const Duration(milliseconds: 900),
+                  enableFx: true,
+                ),
+
+                // 3) 타이틀
                 Positioned(
                   left: titleRect.left * scale,
                   top: titleRect.top * scale,
@@ -292,20 +317,6 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
                     fit: BoxFit.contain,
                     errorBuilder: (c, e, s) => const SizedBox.shrink(),
                   ),
-                ),
-
-                // 3) 중앙 과일 + 샤인 + (내장)정답 오버레이
-                CenterFruitWithShine(
-                  fruit: _answer,
-                  controller: _centerCtrl,
-                  framesBasePath: 'assets/images/quiz/effects/shine_seq/shine_',
-                  frameDigits: 3,
-                  frameCount: 4,
-                  fps: 12,
-                  repeats: 3,
-                  autoplay: true,
-                  fxDuration: const Duration(milliseconds: 900),
-                  enableFx: true,
                 ),
 
                 // 4) 우측 보기 슬롯
