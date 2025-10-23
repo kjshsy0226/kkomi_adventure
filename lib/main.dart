@@ -6,15 +6,25 @@ import 'screens/splash_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // ✅ 윈도우 매니저 초기화
   await windowManager.ensureInitialized();
+
+  // ✅ Release 모드에서 창 크기 및 위치 지정
   const opts = WindowOptions(
     title: '꼬미와 알록달록 채소 과일',
-    backgroundColor: Colors.transparent,
-    fullScreen: false,
+    backgroundColor: Colors.black, // 🔸 Release 모드에서 투명은 피함
+    center: true,
+    fullScreen: false, // 나중에 fullScreen으로 전환
   );
+
   windowManager.waitUntilReadyToShow(opts, () async {
     await windowManager.show();
     await windowManager.focus();
+
+    // ✅ 창 크기/위치 지정 후 풀스크린 진입
+    await windowManager.setSize(const Size(1920, 1080));
+    await windowManager.setPosition(const Offset(0, 0));
+    await Future.delayed(const Duration(milliseconds: 200));
     await windowManager.setFullScreen(true);
   });
 
@@ -33,68 +43,90 @@ class BaseApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.orange),
         useMaterial3: true,
       ),
-      home: const AppHotkeys(child: SplashScreen()),
+      builder: (context, child) =>
+          HotkeyGlobal(child: child ?? const SizedBox()),
+      home: const SplashScreen(),
     );
   }
 }
 
-class AppHotkeys extends StatefulWidget {
+/// 앱 전역 핫키 (F11/Alt+Enter 토글, ESC 해제, macOS Ctrl+Cmd+F)
+class HotkeyGlobal extends StatefulWidget {
   final Widget child;
-  const AppHotkeys({super.key, required this.child});
+  const HotkeyGlobal({super.key, required this.child});
 
   @override
-  State<AppHotkeys> createState() => _AppHotkeysState();
+  State<HotkeyGlobal> createState() => _HotkeyGlobalState();
 }
 
-class _AppHotkeysState extends State<AppHotkeys> {
+class _HotkeyGlobalState extends State<HotkeyGlobal> {
+  Future<void> _toggleFullscreen() async {
+    final isFull = await windowManager.isFullScreen();
+    await windowManager.setFullScreen(!isFull);
+  }
+
   Future<void> _exitFullscreenIfNeeded() async {
     if (await windowManager.isFullScreen()) {
       await windowManager.setFullScreen(false);
     }
   }
 
-  Future<void> _toggleFullscreen() async {
-    final isFull = await windowManager.isFullScreen();
-    await windowManager.setFullScreen(!isFull);
+  bool _onKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+
+    final key = event.logicalKey;
+    final pressed = HardwareKeyboard.instance.logicalKeysPressed;
+
+    bool isPressed(LogicalKeyboardKey k) => pressed.contains(k);
+    final isAlt = isPressed(LogicalKeyboardKey.altLeft) ||
+        isPressed(LogicalKeyboardKey.altRight) ||
+        isPressed(LogicalKeyboardKey.alt);
+    final isMeta = isPressed(LogicalKeyboardKey.metaLeft) ||
+        isPressed(LogicalKeyboardKey.metaRight) ||
+        isPressed(LogicalKeyboardKey.meta);
+    final isCtrl = isPressed(LogicalKeyboardKey.controlLeft) ||
+        isPressed(LogicalKeyboardKey.controlRight) ||
+        isPressed(LogicalKeyboardKey.control);
+
+    // ESC → 풀스크린 해제
+    if (key == LogicalKeyboardKey.escape) {
+      _exitFullscreenIfNeeded();
+      return true;
+    }
+
+    // F11 → 풀스크린 토글
+    if (key == LogicalKeyboardKey.f11) {
+      _toggleFullscreen();
+      return true;
+    }
+
+    // Alt+Enter → 풀스크린 토글 (Windows/Linux)
+    if (isAlt && key == LogicalKeyboardKey.enter) {
+      _toggleFullscreen();
+      return true;
+    }
+
+    // macOS: Ctrl+Cmd+F
+    if (isMeta && isCtrl && key == LogicalKeyboardKey.keyF) {
+      _toggleFullscreen();
+      return true;
+    }
+
+    return false;
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Focus(
-      autofocus: true,
-      // ✅ 시그니처: (FocusNode node, KeyEvent event)
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          final key = event.logicalKey;
-
-          // ESC → 풀스크린 해제
-          if (key == LogicalKeyboardKey.escape) {
-            _exitFullscreenIfNeeded();
-            return KeyEventResult.handled;
-          }
-
-          // F11 또는 Alt+Enter → 토글
-          final isAltEnter =
-              key == LogicalKeyboardKey.enter &&
-              HardwareKeyboard.instance.isAltPressed;
-          if (key == LogicalKeyboardKey.f11 || isAltEnter) {
-            _toggleFullscreen();
-            return KeyEventResult.handled;
-          }
-
-          // macOS: Ctrl+Cmd+F → 토글
-          final isMacToggle =
-              HardwareKeyboard.instance.isMetaPressed &&
-              HardwareKeyboard.instance.isControlPressed &&
-              key == LogicalKeyboardKey.keyF;
-          if (isMacToggle) {
-            _toggleFullscreen();
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-      child: widget.child,
-    );
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_onKeyEvent);
   }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKeyEvent);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
