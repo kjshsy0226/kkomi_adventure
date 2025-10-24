@@ -84,6 +84,14 @@ flutter:
     - assets/audio/bgm/
     - assets/audio/sfx/
     - assets/videos/
+    # ▼ 학습 전용 경로 추가
+    - assets/images/learn/
+    - assets/images/learn/apple/
+    - assets/images/learn/carrot/
+    - assets/images/learn/cucumber/
+    - assets/images/learn/grape/
+    - assets/images/learn/radish/
+    - assets/videos/learn/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

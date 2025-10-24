@@ -302,7 +302,7 @@ class _AnswerOverlayImageState extends State<_AnswerOverlayImage>
             child: Image.asset(
               widget.imagePath,
               fit: BoxFit.fill, // 부모가 1920×1080 프레임
-              errorBuilder: (c, e, s) => Center(
+              errorBuilder: (context, error, stack) => Center(
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 32,
