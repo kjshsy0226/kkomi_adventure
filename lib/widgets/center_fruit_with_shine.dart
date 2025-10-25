@@ -29,7 +29,7 @@ class CenterFruitWithShine extends StatefulWidget {
     required this.controller,
 
     // Shine sequence
-    this.framesBasePath = 'assets/images/quiz/effects/shine_seq/shine_',
+    this.framesBasePath = 'assets/images/effects/shine_seq/shine_',
     this.frameDigits = 3,
     this.frameCount = 5,
     this.fps = 12,

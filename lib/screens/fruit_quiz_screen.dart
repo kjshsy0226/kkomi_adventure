@@ -147,6 +147,21 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
     super.dispose();
   }
 
+  // ✅ 공통 홈 이동 헬퍼
+  Future<void> _goHome() async {
+    await _bgm.stop();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      PageRouteBuilder(
+        pageBuilder: (c, a, b) => const SplashScreen(),
+        transitionsBuilder: (c, a, b, child) =>
+            FadeTransition(opacity: a, child: child),
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
+      (route) => false,
+    );
+  }
+
   String _pickWrongOption(Fruit ans) {
     final exclude = _nameForFile[ans]!;
     final pool = _optionPool29.where((n) => n != exclude).toList();
@@ -186,10 +201,13 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
     }
   }
 
+  // ✅ 첫 문제(index==0)에서 이전 누르면 홈으로 이동
   void _prev() {
     if (_idx > 0) {
       _idx--;
       _makeQuestion();
+    } else {
+      _goHome();
     }
   }
 
@@ -296,7 +314,7 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
                 CenterFruitWithShine(
                   fruit: _answer,
                   controller: _centerCtrl,
-                  framesBasePath: 'assets/images/quiz/effects/shine_seq/shine_',
+                  framesBasePath: 'assets/images/effects/shine_seq/shine_',
                   frameDigits: 3,
                   frameCount: 5,
                   fps: 12,
@@ -351,22 +369,8 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
                     alignment: Alignment.topRight,
                     child: GameControllerBar(
                       isPaused: _bgmPaused,
-                      onHome: () async {
-                        await _bgm.stop();
-                        if (!context.mounted) return;
-                        Navigator.of(context).pushAndRemoveUntil(
-                          PageRouteBuilder(
-                            pageBuilder: (c, a, b) => const SplashScreen(),
-                            transitionsBuilder: (c, a, b, child) =>
-                                FadeTransition(opacity: a, child: child),
-                            transitionDuration: const Duration(
-                              milliseconds: 300,
-                            ),
-                          ),
-                          (route) => false,
-                        );
-                      },
-                      onPrev: _prev,
+                      onHome: _goHome, // ✅ 공통 함수 사용
+                      onPrev: _prev, // ✅ 첫 문제에서 홈으로 이동
                       onNext: _next,
                       onPauseToggle: () async {
                         if (_bgmPaused) {
