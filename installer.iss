@@ -1,12 +1,12 @@
 ; installer.iss — Kkomi Adventure (Flutter Windows)
 #define AppName "Kkomi Adventure"
 #define AppVersion "1.0.0"
-#define Publisher "I-DESIGN-LAB"
+#define Publisher "Luke"
 #define ExeName "kkomi_adventure.exe"
 #define BuildDir "build\\windows\\x64\\runner\\Release"
 
 [Setup]
-AppId={{A5B8B0D1-3E0E-4B7D-9A7D-FA2E7B2BDE11}}
+AppId={{3C4F5B6E-2A6E-4C12-9F6F-12D5B7F0A1A1}}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#Publisher}

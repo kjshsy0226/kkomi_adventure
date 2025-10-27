@@ -1,43 +1,100 @@
 import 'package:flutter/material.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:window_manager/window_manager.dart';
 
 class GameControllerBar extends StatefulWidget {
-  final VoidCallback? onHome;
-  final VoidCallback? onPrev;
-  final VoidCallback? onNext;
-  final VoidCallback? onPauseToggle;
-  final bool isPaused;
-
   const GameControllerBar({
     super.key,
     this.onHome,
     this.onPrev,
     this.onNext,
     this.onPauseToggle,
+    this.onExit,
     this.isPaused = false,
   });
+
+  final VoidCallback? onHome;
+  final VoidCallback? onPrev;
+  final VoidCallback? onNext;
+  final VoidCallback? onPauseToggle;
+  final VoidCallback? onExit; // 윈도우 종료 외에 추가 액션(로그/세이브 등) 필요 시 사용
+  final bool isPaused;
 
   @override
   State<GameControllerBar> createState() => _GameControllerBarState();
 }
 
 class _GameControllerBarState extends State<GameControllerBar> {
-  // 바 고정 크기(디자인 기준)
-  static const double _barW = 460;
+  // 바/버튼 크기 (bar.png: 580×135)
+  static const double _barW = 580;
   static const double _barH = 135;
 
-  // 버튼 실제 렌더 크기 (요청: 99×106)
   static const double _btnW = 99;
   static const double _btnH = 106;
 
-  // 4개 버튼이 바 안에 정확히 들어가도록 패딩/간격 조정
-  // 396(버튼폭 합) + 62(여유: 좌우패딩 10*2 + 간격 14*3) = 458 <= 460
-  static const double _hPad = 10; // 좌우 패딩
-  static const double _gap = 14; // 버튼 사이 간격
+  // 5개 맞춤: 5*99 + 4*12 + 2*10 = 563 <= 580
+  static const double _hPad = 10;
+  static const double _gap = 12;
 
+  // 프레스 상태
   bool _pressedHome = false;
   bool _pressedPrev = false;
   bool _pressedPause = false;
   bool _pressedNext = false;
+  bool _pressedExit = false;
+
+  // 클릭 SFX (저지연 최적화)
+  late final AudioPlayer _tapPlayer;
+
+  @override
+  void initState() {
+    super.initState();
+    _tapPlayer = AudioPlayer()
+      ..setPlayerMode(PlayerMode.lowLatency)
+      ..setReleaseMode(ReleaseMode.stop)
+      ..setVolume(0.9)
+      // 선재생 지연 제거를 위한 프리로드
+      ..setSource(AssetSource('audio/sfx/btn_tap.mp3'));
+  }
+
+  @override
+  void dispose() {
+    _tapPlayer.dispose();
+    super.dispose();
+  }
+
+  Future<void> _playTapAndExitAfter(Duration delay) async {
+    try {
+      final p = AudioPlayer()
+        ..setPlayerMode(PlayerMode.lowLatency)
+        ..setReleaseMode(ReleaseMode.stop)
+        ..setVolume(0.9);
+
+      // Exit 전용: 임시 플레이어로 바로 재생
+      await p.play(AssetSource('audio/sfx/btn_tap.mp3'));
+
+      // 짧은 지연 후 종료 + 정리
+      Future.delayed(delay, () async {
+        try {
+          await p.dispose();
+        } catch (_) {}
+        await windowManager.close();
+      });
+    } catch (_) {
+      // 실패시라도 종료는 진행
+      await windowManager.close();
+    }
+  }
+
+  Future<void> _playTap() async {
+    await _tapPlayer.seek(Duration.zero); // 맨 앞으로
+    await _tapPlayer.resume(); // 미리 로드된 소스 재생
+  }
+
+  void _resetPressed() {
+    _pressedHome = _pressedPrev = _pressedPause = _pressedNext = _pressedExit =
+        false;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,10 +104,7 @@ class _GameControllerBarState extends State<GameControllerBar> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // 배경 바
           Image.asset('assets/images/ui/controller/bar.png', fit: BoxFit.fill),
-
-          // 버튼들
           Align(
             alignment: Alignment.center,
             child: Padding(
@@ -62,9 +116,9 @@ class _GameControllerBarState extends State<GameControllerBar> {
                     normal: 'assets/images/ui/controller/btn_home.png',
                     pressed: 'assets/images/ui/controller/btn_home_pressed.png',
                     pressedFlag: _pressedHome,
-                    onTapDown: () => setState(() => _pressedHome = true),
-                    onTapUp: () {
-                      setState(() => _pressedHome = false);
+                    setPressed: (v) => setState(() => _pressedHome = v),
+                    onTap: () {
+                      _playTap();
                       widget.onHome?.call();
                     },
                   ),
@@ -73,9 +127,9 @@ class _GameControllerBarState extends State<GameControllerBar> {
                     normal: 'assets/images/ui/controller/btn_prev.png',
                     pressed: 'assets/images/ui/controller/btn_prev_pressed.png',
                     pressedFlag: _pressedPrev,
-                    onTapDown: () => setState(() => _pressedPrev = true),
-                    onTapUp: () {
-                      setState(() => _pressedPrev = false);
+                    setPressed: (v) => setState(() => _pressedPrev = v),
+                    onTap: () {
+                      _playTap();
                       widget.onPrev?.call();
                     },
                   ),
@@ -88,9 +142,9 @@ class _GameControllerBarState extends State<GameControllerBar> {
                         ? 'assets/images/ui/controller/btn_play_pressed.png'
                         : 'assets/images/ui/controller/btn_pause_pressed.png',
                     pressedFlag: _pressedPause,
-                    onTapDown: () => setState(() => _pressedPause = true),
-                    onTapUp: () {
-                      setState(() => _pressedPause = false);
+                    setPressed: (v) => setState(() => _pressedPause = v),
+                    onTap: () {
+                      _playTap();
                       widget.onPauseToggle?.call();
                     },
                   ),
@@ -99,10 +153,23 @@ class _GameControllerBarState extends State<GameControllerBar> {
                     normal: 'assets/images/ui/controller/btn_next.png',
                     pressed: 'assets/images/ui/controller/btn_next_pressed.png',
                     pressedFlag: _pressedNext,
-                    onTapDown: () => setState(() => _pressedNext = true),
-                    onTapUp: () {
-                      setState(() => _pressedNext = false);
+                    setPressed: (v) => setState(() => _pressedNext = v),
+                    onTap: () {
+                      _playTap();
                       widget.onNext?.call();
+                    },
+                  ),
+                  const SizedBox(width: _gap),
+                  _buildButton(
+                    normal: 'assets/images/ui/controller/btn_exit.png',
+                    pressed: 'assets/images/ui/controller/btn_exit_pressed.png',
+                    pressedFlag: _pressedExit,
+                    setPressed: (v) => setState(() => _pressedExit = v),
+                    onTap: () {
+                      // 다른 버튼들은 기존 _playTap() + 즉시 동작 유지
+                      // Exit만 소리 듣고 잠깐 후 종료
+                      widget.onExit?.call(); // 로그/세이브 등 선처리
+                      _playTapAndExitAfter(const Duration(milliseconds: 180));
                     },
                   ),
                 ],
@@ -118,20 +185,21 @@ class _GameControllerBarState extends State<GameControllerBar> {
     required String normal,
     required String pressed,
     required bool pressedFlag,
-    required VoidCallback onTapDown,
-    required VoidCallback onTapUp,
+    required ValueChanged<bool> setPressed,
+    required VoidCallback onTap,
   }) {
     return GestureDetector(
-      onTapDown: (_) => onTapDown(),
-      onTapUp: (_) => onTapUp(),
-      onTapCancel: () => setState(() {
-        _pressedHome = _pressedPrev = _pressedPause = _pressedNext = false;
-      }),
+      onTapDown: (_) => setPressed(true),
+      onTapUp: (_) {
+        setPressed(false);
+        onTap();
+      },
+      onTapCancel: () => setState(_resetPressed),
       child: Image.asset(
         pressedFlag ? pressed : normal,
         width: _btnW,
         height: _btnH,
-        fit: BoxFit.contain, // 비율 유지 (원형 이미지 왜곡 방지)
+        fit: BoxFit.contain,
       ),
     );
   }
