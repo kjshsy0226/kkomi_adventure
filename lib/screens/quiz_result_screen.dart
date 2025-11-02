@@ -2,6 +2,8 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
+import 'package:audioplayers/audioplayers.dart';
+
 import 'splash_screen.dart';
 
 class QuizResultScreen extends StatefulWidget {
@@ -12,8 +14,14 @@ class QuizResultScreen extends StatefulWidget {
 }
 
 class _QuizResultScreenState extends State<QuizResultScreen> {
-  late final VideoPlayerController _c;
-  bool _inited = false;
+  // ── Video & Audio ─────────────────────────────────────────────────────
+  late final VideoPlayerController _introC; // result.mp4 (단발)
+  late final VideoPlayerController _loopC; // result_loop.mp4 (반복)
+  final AudioPlayer _bgm = AudioPlayer(); // result_bgm.mp3 (반복)
+
+  bool _initOnce = false;
+  bool _ready = false;
+  bool _showIntro = true; // 위 레이어 표시/숨김 (즉시 전환)
   bool _navigating = false;
   String? _error;
 
@@ -23,21 +31,24 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
   void initState() {
     super.initState();
 
-    _c = VideoPlayerController.asset('assets/videos/result.mp4')
+    _introC = VideoPlayerController.asset('assets/videos/result.mp4')
       ..setLooping(false);
 
+    _loopC = VideoPlayerController.asset('assets/videos/result_loop.mp4')
+      ..setLooping(true);
+
     _onTick = () {
-      if (!_c.value.isInitialized) return;
-      final v = _c.value;
+      final v = _introC.value;
+      if (!v.isInitialized) return;
 
       if (v.hasError && _error == null) {
         _error = v.errorDescription ?? 'Video error';
-        _c.pause();
+        _introC.pause();
       }
 
-      // 끝나면 마지막 프레임에서 정지 유지 (자동 이동 없음)
+      // 인트로가 실제로 끝나는 순간에만 처리 (프리롤/페이드 없음)
       if (!v.isPlaying && v.isInitialized && v.position >= v.duration) {
-        _c.pause();
+        _startLoopAndHideIntro();
       }
 
       if (mounted) setState(() {});
@@ -47,41 +58,74 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
   }
 
   Future<void> _initialize() async {
+    if (_initOnce) return;
+    _initOnce = true;
+
     try {
-      await _c.initialize();
+      // 1) 두 영상 initialize
+      await Future.wait([_introC.initialize(), _loopC.initialize()]);
       if (!mounted) return;
 
-      _c.addListener(_onTick);
+      _introC.addListener(_onTick);
 
-      // 첫 프레임 보장: 짧게 play → 즉시 pause
-      await _c.play();
-      await _c.pause();
+      // 2) 텍스처 프리패치: play → pause (깜빡임 최소화)
+      await _introC.play();
+      await _introC.pause();
+      await _loopC.play();
+      await _loopC.pause();
 
-      setState(() {
-        _inited = true;
-      });
+      // 3) BGM 무한 반복
+      await _bgm.setReleaseMode(ReleaseMode.loop);
+      await _bgm.setVolume(1.0);
+      await _bgm.play(AssetSource('audio/bgm/result_bgm.mp3'));
 
-      // 결과 화면은 자동 재생
-      await _c.play();
+      setState(() => _ready = true);
+
+      // 4) 인트로 재생 시작
+      await _introC.seekTo(Duration.zero);
+      await _introC.play();
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = '$e';
-        _inited = false;
-      });
+      setState(() => _error = '$e');
+    }
+  }
+
+  Future<void> _startLoopAndHideIntro() async {
+    try {
+      // (1) 루프 0부터 재생 시작
+      await _loopC.seekTo(Duration.zero);
+      await _loopC.play();
+      // (2) 인트로 즉시 숨김 (페이드 X)
+      try {
+        await _introC.pause();
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() => _showIntro = false);
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
     }
   }
 
   @override
   void dispose() {
-    _c.removeListener(_onTick);
-    _c.dispose();
+    _introC.removeListener(_onTick);
+    _introC.dispose();
+    _loopC.dispose();
+    _bgm.stop();
+    _bgm.dispose();
     super.dispose();
   }
 
   void _backToSplash() {
     if (_navigating || !mounted) return;
     _navigating = true;
+
+    // 재생 중지(안전)
+    try {
+      _introC.pause();
+      _loopC.pause();
+      _bgm.stop();
+    } catch (_) {}
 
     Navigator.of(context).pushAndRemoveUntil(
       PageRouteBuilder(
@@ -110,10 +154,14 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final ready = _inited && _c.value.isInitialized && _error == null;
+    final ready =
+        _ready &&
+        _introC.value.isInitialized &&
+        _loopC.value.isInitialized &&
+        _error == null;
 
     return GestureDetector(
-      onTap: _backToSplash, // 탭하면 처음으로
+      onTap: _backToSplash,
       child: Focus(
         autofocus: true,
         onKeyEvent: _onKeyEvent,
@@ -122,16 +170,37 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
           body: Stack(
             fit: StackFit.expand,
             children: [
-              if (ready)
-                FittedBox(
-                  fit: BoxFit.cover,
-                  child: SizedBox(
-                    width: _c.value.size.width,
-                    height: _c.value.size.height,
-                    child: VideoPlayer(_c),
+              if (ready) ...[
+                // 바닥: 루프 (인트로 끝난 뒤부터 재생)
+                Positioned.fill(
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: _loopC.value.size.width,
+                      height: _loopC.value.size.height,
+                      child: VideoPlayer(_loopC),
+                    ),
                   ),
-                )
-              else
+                ),
+                // 위: 인트로 (끝나면 즉시 숨김)
+                Positioned.fill(
+                  child: Visibility(
+                    visible: _showIntro,
+                    maintainState: true,
+                    maintainAnimation: true,
+                    maintainSize: true,
+                    child: FittedBox(
+                      fit: BoxFit.cover,
+                      child: SizedBox(
+                        width: _introC.value.size.width,
+                        height: _introC.value.size.height,
+                        child: VideoPlayer(_introC),
+                      ),
+                    ),
+                  ),
+                ),
+              ] else
+                // 프리로딩/에러 화면
                 Container(
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(

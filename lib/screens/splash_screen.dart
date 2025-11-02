@@ -1,8 +1,10 @@
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:kkomi_adventure/screens/fruit_quiz_screen.dart';
 import 'package:video_player/video_player.dart';
+import 'package:audioplayers/audioplayers.dart';
+
+import 'package:kkomi_adventure/screens/fruit_quiz_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -12,71 +14,115 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  late final VideoPlayerController _c;
-  bool _initTried = false;
-  bool _initOk = false;
-  bool _ended = false;
+  // ── Video & Audio ─────────────────────────────────────────────────────
+  late final VideoPlayerController _introC; // splash.mp4 (단발)
+  late final VideoPlayerController _loopC; // splash_loop.mp4 (반복)
+  final AudioPlayer _bgm = AudioPlayer(); // splash_bgm.mp3 (반복)
+
+  bool _initOnce = false;
+  bool _ready = false;
+  bool _showIntro = true; // 위 레이어 표시/숨김 (즉시 전환)
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    // Windows 배포 시: splash.mp4는 H.264 + AAC 권장 (Media Foundation 호환)
-    _c = VideoPlayerController.asset('assets/videos/splash.mp4')
-      ..setLooping(false)
-      ..addListener(_onVideoTick);
+
+    _introC =
+        VideoPlayerController.asset(
+            'assets/videos/splash.mp4',
+            videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+          )
+          ..setLooping(false)
+          ..addListener(_onIntroTick);
+
+    _loopC = VideoPlayerController.asset(
+      'assets/videos/splash_loop.mp4',
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+    )..setLooping(true);
 
     _initialize();
   }
 
   Future<void> _initialize() async {
-    if (_initTried) return;
-    _initTried = true;
+    if (_initOnce) return;
+    _initOnce = true;
+
     try {
-      await _c.initialize();
-      if (!mounted) return;
+      // 1) 두 영상 미리 initialize
+      await Future.wait([_introC.initialize(), _loopC.initialize()]);
 
-      // 첫 프레임 고정 패턴: 짧게 play → pause
-      await _c.play();
-      await _c.pause();
+      // 2) 텍스처 준비: play → pause
+      await _introC.play();
+      await _introC.pause();
+      await _loopC.play();
+      await _loopC.pause();
 
-      setState(() {
-        _initOk = true;
-      });
+      // 3) BGM 루프
+      await _bgm.setReleaseMode(ReleaseMode.loop);
+      await _bgm.setVolume(1.0);
+      await _bgm.play(AssetSource('audio/bgm/splash_bgm.mp3'));
 
-      // 자동 재생 원하면 아래 주석 해제
-      await _c.play();
+      setState(() => _ready = true);
+
+      // 4) 인트로 재생 시작
+      await _introC.seekTo(Duration.zero);
+      await _introC.play();
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = '$e';
-        _initOk = false;
-      });
+      setState(() => _error = '$e');
     }
   }
 
-  void _onVideoTick() {
-    final v = _c.value;
-    if (v.hasError && _error == null) {
+  // 인트로 프레임 이벤트
+  void _onIntroTick() {
+    if (_error != null) return;
+    final v = _introC.value;
+    if (!v.isInitialized) return;
+
+    if (v.hasError) {
       setState(() => _error = v.errorDescription ?? 'Video error');
+      return;
     }
-    if (v.isInitialized && !v.isPlaying && v.position >= v.duration) {
-      if (!_ended) {
-        _ended = true;
-        _c.pause();
-        setState(() {});
-      }
+
+    // 인트로가 실제로 끝남 → (1) 루프 0부터 재생 시작, (2) 인트로 즉시 숨김
+    if (!v.isPlaying && v.position >= v.duration) {
+      _startLoopAndHideIntro();
+    }
+  }
+
+  Future<void> _startLoopAndHideIntro() async {
+    try {
+      await _loopC.seekTo(Duration.zero);
+      await _loopC.play();
+      try {
+        await _introC.pause();
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() => _showIntro = false); // 페이드 없음, 즉시 hide
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
     }
   }
 
   @override
   void dispose() {
-    _c.removeListener(_onVideoTick);
-    _c.dispose();
+    _introC.removeListener(_onIntroTick);
+    _introC.dispose();
+    _loopC.dispose();
+    _bgm.stop();
+    _bgm.dispose();
     super.dispose();
   }
 
-  void _goNext() {
+  // 다음 화면으로
+  Future<void> _goNext() async {
+    try {
+      await _introC.pause();
+      await _loopC.pause();
+      await _bgm.stop();
+    } catch (_) {}
+    if (!mounted) return;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         pageBuilder: (context, a, b) => const FruitQuizScreen(),
@@ -87,13 +133,13 @@ class _SplashScreenState extends State<SplashScreen> {
     );
   }
 
-  // ✅ 새로운 키 이벤트 API 사용 (3.18+)
+  // 키 입력(Enter/Space)
   KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent) {
-      final key = event.logicalKey;
-      if (key == LogicalKeyboardKey.enter ||
-          key == LogicalKeyboardKey.numpadEnter ||
-          key == LogicalKeyboardKey.space) {
+      final k = event.logicalKey;
+      if (k == LogicalKeyboardKey.enter ||
+          k == LogicalKeyboardKey.numpadEnter ||
+          k == LogicalKeyboardKey.space) {
         _goNext();
         return KeyEventResult.handled;
       }
@@ -103,28 +149,53 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canShowVideo = _initOk && _c.value.isInitialized && _error == null;
+    final ready =
+        _ready &&
+        _introC.value.isInitialized &&
+        _loopC.value.isInitialized &&
+        _error == null;
 
     return GestureDetector(
-      onTap: _goNext, // 탭/클릭으로 진행
+      onTap: _goNext,
       child: Focus(
         autofocus: true,
-        onKeyEvent: _onKeyEvent, // ✅ deprecated된 onKey 대신 onKeyEvent
+        onKeyEvent: _onKeyEvent,
         child: Scaffold(
           backgroundColor: Colors.black,
           body: Stack(
             fit: StackFit.expand,
             children: [
-              if (canShowVideo)
-                FittedBox(
-                  fit: BoxFit.cover,
-                  child: SizedBox(
-                    width: _c.value.size.width,
-                    height: _c.value.size.height,
-                    child: VideoPlayer(_c),
+              if (ready) ...[
+                // 바닥: loop (처음엔 pause 상태였고, 인트로 끝날 때부터 재생)
+                Positioned.fill(
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: _loopC.value.size.width,
+                      height: _loopC.value.size.height,
+                      child: VideoPlayer(_loopC),
+                    ),
                   ),
-                )
-              else
+                ),
+                // 위: intro (끝나면 즉시 숨김)
+                Positioned.fill(
+                  child: Visibility(
+                    visible: _showIntro,
+                    maintainState: true,
+                    maintainAnimation: true,
+                    maintainSize: true,
+                    child: FittedBox(
+                      fit: BoxFit.cover,
+                      child: SizedBox(
+                        width: _introC.value.size.width,
+                        height: _introC.value.size.height,
+                        child: VideoPlayer(_introC),
+                      ),
+                    ),
+                  ),
+                ),
+              ] else
+                // 프리로딩 화면
                 Container(
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(
@@ -158,13 +229,13 @@ class _SplashScreenState extends State<SplashScreen> {
                   ),
                 ),
 
-              if (_error != null && (Platform.isWindows))
+              if (_error != null && Platform.isWindows)
                 const Positioned(
                   left: 16,
                   bottom: 24,
                   right: 16,
                   child: Text(
-                    '힌트: Windows 배포 시 MP4(H.264 + AAC) 권장.\n'
+                    '힌트: Windows 배포 시 MP4는 H.264 + AAC 권장.\n'
                     '다른 코덱/컨테이너는 재생이 안 될 수 있어요.',
                     style: TextStyle(color: Colors.white38, fontSize: 12),
                   ),
