@@ -1,4 +1,5 @@
 import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb; // ✅ 추가
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -167,16 +168,7 @@ class _SplashScreenState extends State<SplashScreen> {
             children: [
               if (ready) ...[
                 // 바닥: loop (처음엔 pause 상태였고, 인트로 끝날 때부터 재생)
-                Positioned.fill(
-                  child: FittedBox(
-                    fit: BoxFit.cover,
-                    child: SizedBox(
-                      width: _loopC.value.size.width,
-                      height: _loopC.value.size.height,
-                      child: VideoPlayer(_loopC),
-                    ),
-                  ),
-                ),
+                PositionedFillVideo(controller: _loopC),
                 // 위: intro (끝나면 즉시 숨김)
                 Positioned.fill(
                   child: Visibility(
@@ -229,7 +221,8 @@ class _SplashScreenState extends State<SplashScreen> {
                   ),
                 ),
 
-              if (_error != null && Platform.isWindows)
+              // ✅ 웹에서는 Platform 접근 금지: kIsWeb 먼저 검사
+              if (_error != null && !kIsWeb && Platform.isWindows)
                 const Positioned(
                   left: 16,
                   bottom: 24,
@@ -242,6 +235,26 @@ class _SplashScreenState extends State<SplashScreen> {
                 ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// loop 비디오 바닥 레이어 위젯 (가독성 위해 분리)
+class PositionedFillVideo extends StatelessWidget {
+  final VideoPlayerController controller;
+  const PositionedFillVideo({super.key, required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: FittedBox(
+        fit: BoxFit.cover,
+        child: SizedBox(
+          width: controller.value.size.width,
+          height: controller.value.size.height,
+          child: VideoPlayer(controller),
         ),
       ),
     );
