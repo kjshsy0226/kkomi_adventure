@@ -39,7 +39,7 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
 
   // 보기 이미지 파일 풀(총 29개)
   static const String _optionDir = 'assets/images/fruits/options';
-  static const List<String> _optionPool29 = [
+  static const List<String> _optionPool28 = [
     'apple',
     'banana',
     'blueberry',
@@ -53,7 +53,6 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
     'manggo',
     'melon',
     'onion',
-    'orange',
     'orientalMelon',
     'paprika',
     'pear',
@@ -164,7 +163,7 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
 
   String _pickWrongOption(Fruit ans) {
     final exclude = _nameForFile[ans]!;
-    final pool = _optionPool29.where((n) => n != exclude).toList();
+    final pool = _optionPool28.where((n) => n != exclude).toList();
     final name = pool[rand.nextInt(pool.length)];
     return _optionPath(name);
   }
