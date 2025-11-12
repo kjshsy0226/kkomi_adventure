@@ -3,13 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 
 import '../models/fruit_enum.dart';
-import '../widgets/background_layer.dart';
 import '../widgets/center_fruit_with_shine.dart';
 import '../widgets/option_pair.dart';
-import '../widgets/kkomi_reaction.dart';
+import '../widgets/kkomi_reaction_video.dart';
 import '../widgets/game_controller_bar.dart';
 import 'quiz_result_screen.dart';
-import 'splash_screen.dart'; // ✅ 홈으로 복귀용
+import 'splash_screen.dart';
 
 class FruitQuizScreen extends StatefulWidget {
   const FruitQuizScreen({
@@ -37,7 +36,7 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
   static const Rect titleRect = Rect.fromLTWH(44, 34, 1001, 144);
   static const Rect slotRect = Rect.fromLTWH(1490, 240, 345, 778);
 
-  // 보기 이미지 파일 풀(총 29개)
+  // 보기 이미지 파일 풀(옵션용 - 에셋 있는 이름만 두세요)
   static const String _optionDir = 'assets/images/fruits/options';
   static const List<String> _optionPool28 = [
     'apple',
@@ -50,7 +49,7 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
     'grape',
     'kiwi',
     'lemon',
-    'manggo',
+    'manggo', // 프로젝트 에셋명이 이 표기면 그대로 두세요
     'melon',
     'onion',
     'orientalMelon',
@@ -70,39 +69,39 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
     'zucchini',
   ];
 
-  // 문제 enum → 파일명
+  /// 문제(enum) -> 파일명 매핑(있는 것만 채우고, 나머지는 자동 폴백)
   static const Map<Fruit, String> _nameForFile = {
-    Fruit.apple: 'apple',
-    Fruit.banana: 'banana',
+    // 필요 시 채우세요. 없으면 자동으로 enum 이름을 사용합니다.
     Fruit.carrot: 'carrot',
-    Fruit.cucumber: 'cucumber',
-    Fruit.eggplant: 'eggplant',
-    Fruit.grape: 'grape',
-    Fruit.kiwi: 'kiwi',
-    Fruit.melon: 'melon',
-    Fruit.onion: 'onion',
-    Fruit.orientalMelon: 'orientalMelon',
-    Fruit.paprika: 'paprika',
-    Fruit.pear: 'pear',
-    Fruit.persimmon: 'persimmon',
     Fruit.pineapple: 'pineapple',
-    Fruit.pumpkin: 'pumpkin',
-    Fruit.radish: 'radish',
-    Fruit.strawberry: 'strawberry',
-    Fruit.tangerine: 'tangerine',
-    Fruit.tomato: 'tomato',
-    Fruit.watermelon: 'watermelon',
+    // 예시:
+    // Fruit.apple: 'apple',
+    // Fruit.watermelon: 'watermelon',
+    // ...
   };
 
   String _optionPath(String name) => '$_optionDir/$name.jpg';
-  String _correctOptionPath(Fruit f) => _optionPath(_nameForFile[f]!);
+
+  /// 안전한 파일명 계산: 매핑 없으면 enum 이름을 파일명으로 사용
+  String _fileNameFor(Fruit f) {
+    final mapped = _nameForFile[f];
+    if (mapped != null && mapped.isNotEmpty) return mapped;
+    // enum 이름: Fruit.apple -> 'apple'
+    final raw = f.toString().split('.').last;
+    return raw; // camelCase 그대로 사용(ex: orientalMelon)
+  }
+
+  /// 정답 보기 이미지 경로(Null-Safe)
+  String _correctOptionPath(Fruit f) => _optionPath(_fileNameFor(f));
 
   final rand = Random();
+
+  /// 출제 순서
   late final List<Fruit> _order;
   int _idx = 0;
   Fruit get _answer => _order[_idx];
 
-  // 보기
+  // 보기 상태
   late String _topOptionImg;
   late String _bottomOptionImg;
   late bool _answerIsTop;
@@ -114,11 +113,11 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
   bool _bottomCorrect = false;
   int _instantHideVersion = 0;
 
-  // 꼬미
+  // 꼬미 리액션 컨트롤러
   final _kkomiCtrl = KkomiReactionController();
   bool _waitingNext = false;
 
-  // 중앙 과일 + 정답 오버레이 컨트롤러
+  // 중앙 과일 + 샤인 컨트롤러
   final _centerCtrl = CenterFruitWithShineController();
 
   // BGM
@@ -128,14 +127,22 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
   @override
   void initState() {
     super.initState();
+
+    // 출제 풀: kFruitInfo의 key 전체 사용 (파일명은 폴백으로 처리)
     _order = kFruitInfo.keys.toList();
+    if (_order.isEmpty) {
+      debugPrint('❗ kFruitInfo가 비어있습니다. Fruit 데이터 확인 필요');
+      // 비상 복구: 앱이 바로 죽지 않도록 임시 가드(실사용에선 데이터를 채우세요)
+    }
     if (widget.randomize) _order.shuffle(rand);
+
     _makeQuestion();
     _startBgm();
   }
 
   Future<void> _startBgm() async {
     await _bgm.setReleaseMode(ReleaseMode.loop);
+    await _bgm.setVolume(0.4);
     await _bgm.play(AssetSource('audio/bgm/game_theme.wav'));
   }
 
@@ -146,7 +153,7 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
     super.dispose();
   }
 
-  // ✅ 공통 홈 이동 헬퍼
+  // 홈 이동
   Future<void> _goHome() async {
     await _bgm.stop();
     if (!mounted) return;
@@ -161,14 +168,28 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
     );
   }
 
+  /// 오답 보기 선택(정답 파일명과 다른 이름 중 랜덤)
   String _pickWrongOption(Fruit ans) {
-    final exclude = _nameForFile[ans]!;
+    final exclude = _fileNameFor(ans); // 매핑/폴백 일관
     final pool = _optionPool28.where((n) => n != exclude).toList();
+    if (pool.isEmpty) {
+      debugPrint('❗ 오답 풀 비어있음. 옵션 풀을 확인하세요.');
+      return _optionPath(exclude); // 최악의 경우 동일 보기라도 반환(크래시 방지)
+    }
     final name = pool[rand.nextInt(pool.length)];
     return _optionPath(name);
   }
 
   void _makeQuestion() {
+    if (_order.isEmpty) {
+      // 비상 방어
+      _topOptionImg = _optionPath('apple');
+      _bottomOptionImg = _optionPath('banana');
+      _answerIsTop = true;
+      setState(() {});
+      return;
+    }
+
     final correct = _correctOptionPath(_answer);
     final wrong = _pickWrongOption(_answer);
 
@@ -200,7 +221,7 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
     }
   }
 
-  // ✅ 첫 문제(index==0)에서 이전 누르면 홈으로 이동
+  // 첫 문제에서 이전 → 홈 이동
   void _prev() {
     if (_idx > 0) {
       _idx--;
@@ -232,7 +253,6 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
 
     if (correct) {
       if (!widget.autoNext) {
-        // 자동 넘김 모드가 아니면 성공 리액션만 재생 후 대기
         await _kkomiCtrl.playSuccess();
         return;
       }
@@ -241,21 +261,14 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
       setState(() {});
 
       try {
-        // ✅ 1) 성공 리액션 + 2) 정답 오버레이를 동시에 시작
-        final successF = _kkomiCtrl.playSuccess(); // 끝날 때까지의 Future
-        final overlayF = _centerCtrl.showAnswer(
-          widget.answerHold,
-        ); // 정답 캡션 홀드 Future
-
-        // 둘 다 완료될 때까지 기다림
+        final successF = _kkomiCtrl.playSuccess();
+        final overlayF = _centerCtrl.showAnswer(widget.answerHold);
         await Future.wait([successF, overlayF]);
         if (!mounted) return;
-
         _waitingNext = false;
         setState(() {});
         _next();
       } catch (_) {
-        // 에러가 나도 앱이 막히지 않도록 방어
         if (!mounted) return;
         _waitingNext = false;
         setState(() {});
@@ -299,17 +312,14 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
             height: canvasH,
             child: Stack(
               children: [
-                // 1) 배경
-                BackgroundLayer(fruit: _answer),
-
-                // 1.5) 꼬미 리액션
-                KkomiReaction(
+                // 1) 꼬미 리액션 (영상 기반)
+                KkomiReactionVideo(
                   controller: _kkomiCtrl,
+                  fruit: _answer,
                   canvasRect: canvasRect,
-                  fps: 24,
                 ),
 
-                // 2) 중앙 과일 + 샤인 + (내장)정답 오버레이
+                // 2) 중앙 과일 + 샤인 + 정답 오버레이
                 CenterFruitWithShine(
                   fruit: _answer,
                   controller: _centerCtrl,
@@ -359,7 +369,7 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
                   ),
                 ),
 
-                // 5) ✅ 컨트롤러: 캔버스 우상단, 스케일 반영
+                // 5) 컨트롤러: 캔버스 우상단
                 Positioned(
                   top: controllerTop,
                   right: controllerRight,
@@ -368,12 +378,13 @@ class _FruitQuizScreenState extends State<FruitQuizScreen> {
                     alignment: Alignment.topRight,
                     child: GameControllerBar(
                       isPaused: _bgmPaused,
-                      onHome: _goHome, // ✅ 공통 함수 사용
-                      onPrev: _prev, // ✅ 첫 문제에서 홈으로 이동
+                      onHome: _goHome,
+                      onPrev: _prev,
                       onNext: _next,
                       onPauseToggle: () async {
                         if (_bgmPaused) {
                           await _bgm.resume();
+                          await _bgm.setVolume(0.4);
                         } else {
                           await _bgm.pause();
                         }

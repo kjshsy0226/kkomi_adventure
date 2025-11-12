@@ -70,10 +70,6 @@ flutter:
     - assets/images/fruits/center/
     - assets/images/fruits/options/
     - assets/images/fruits/answer/
-    - assets/images/kkomi/
-    - assets/images/kkomi/base/
-    - assets/images/kkomi/success/
-    - assets/images/kkomi/failure/
     - assets/images/effects/
     - assets/images/effects/shine_seq/
     - assets/images/ui/
@@ -83,6 +79,29 @@ flutter:
     - assets/audio/bgm/
     - assets/audio/sfx/
     - assets/videos/
+    - assets/videos/kkomi/
+    - assets/videos/kkomi/apple/
+    - assets/videos/kkomi/banana/
+    - assets/videos/kkomi/carrot/
+    - assets/videos/kkomi/cucumber/
+    - assets/videos/kkomi/eggplant/
+    - assets/videos/kkomi/grape/
+    - assets/videos/kkomi/kiwi/
+    - assets/videos/kkomi/melon/
+    - assets/videos/kkomi/onion/
+    - assets/videos/kkomi/orientalMelon/
+    - assets/videos/kkomi/paprika/
+    - assets/videos/kkomi/pear/
+    - assets/videos/kkomi/persimmon/
+    - assets/videos/kkomi/pineapple/
+    - assets/videos/kkomi/pumpkin/
+    - assets/videos/kkomi/radish/
+    - assets/videos/kkomi/strawberry/
+    - assets/videos/kkomi/tangerine/
+    - assets/videos/kkomi/tomato/
+    - assets/videos/kkomi/watermelon/
+    - assets/videos/result/
+    - assets/videos/splash/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

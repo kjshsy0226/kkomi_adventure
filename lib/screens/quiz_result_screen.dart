@@ -1,4 +1,5 @@
 import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -25,17 +26,24 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
   bool _navigating = false;
   String? _error;
 
+  // 배경색: 초기 검정 → 루프 시작 시 흰색으로 애니 전환
+  Color _bgColor = Colors.white;
+
   late final VoidCallback _onTick;
 
   @override
   void initState() {
     super.initState();
 
-    _introC = VideoPlayerController.asset('assets/videos/result.mp4')
-      ..setLooping(false);
+    _introC = VideoPlayerController.asset(
+      'assets/videos/result/result.mp4',
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+    )..setLooping(false);
 
-    _loopC = VideoPlayerController.asset('assets/videos/result_loop.mp4')
-      ..setLooping(true);
+    _loopC = VideoPlayerController.asset(
+      'assets/videos/result/result_loop.mp4',
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+    )..setLooping(true);
 
     _onTick = () {
       final v = _introC.value;
@@ -46,7 +54,7 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
         _introC.pause();
       }
 
-      // 인트로가 실제로 끝나는 순간에만 처리 (프리롤/페이드 없음)
+      // 인트로가 실제로 끝나는 순간에만 처리
       if (!v.isPlaying && v.isInitialized && v.position >= v.duration) {
         _startLoopAndHideIntro();
       }
@@ -74,9 +82,9 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
       await _loopC.play();
       await _loopC.pause();
 
-      // 3) BGM 무한 반복
+      // 3) BGM 무한 반복 (🔉 볼륨 0.4)
       await _bgm.setReleaseMode(ReleaseMode.loop);
-      await _bgm.setVolume(1.0);
+      await _bgm.setVolume(0.4);
       await _bgm.play(AssetSource('audio/bgm/result_bgm.mp3'));
 
       setState(() => _ready = true);
@@ -95,12 +103,18 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
       // (1) 루프 0부터 재생 시작
       await _loopC.seekTo(Duration.zero);
       await _loopC.play();
-      // (2) 인트로 즉시 숨김 (페이드 X)
+      // (2) 인트로 숨김
       try {
         await _introC.pause();
       } catch (_) {}
+
       if (!mounted) return;
-      setState(() => _showIntro = false);
+
+      // (3) 배경을 검정 → 흰색으로 부드럽게 전환 (300ms)
+      setState(() {
+        _showIntro = false;
+        _bgColor = Colors.white;
+      });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -166,87 +180,98 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
         autofocus: true,
         onKeyEvent: _onKeyEvent,
         child: Scaffold(
-          backgroundColor: Colors.black,
-          body: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (ready) ...[
-                // 바닥: 루프 (인트로 끝난 뒤부터 재생)
-                Positioned.fill(
-                  child: FittedBox(
-                    fit: BoxFit.cover,
-                    child: SizedBox(
-                      width: _loopC.value.size.width,
-                      height: _loopC.value.size.height,
-                      child: VideoPlayer(_loopC),
-                    ),
-                  ),
-                ),
-                // 위: 인트로 (끝나면 즉시 숨김)
-                Positioned.fill(
-                  child: Visibility(
-                    visible: _showIntro,
-                    maintainState: true,
-                    maintainAnimation: true,
-                    maintainSize: true,
-                    child: FittedBox(
-                      fit: BoxFit.cover,
-                      child: SizedBox(
-                        width: _introC.value.size.width,
-                        height: _introC.value.size.height,
-                        child: VideoPlayer(_introC),
+          body: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            color: _bgColor, // 검정 → 흰색 전환
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (ready) ...[
+                  // 바닥: 루프 (인트로 끝난 뒤부터 재생)
+                  PositionedFillVideo(controller: _loopC),
+
+                  // 위: 인트로 (끝나면 즉시 숨김)
+                  Positioned.fill(
+                    child: Visibility(
+                      visible: _showIntro,
+                      maintainState: true,
+                      maintainAnimation: true,
+                      maintainSize: true,
+                      child: FittedBox(
+                        fit: BoxFit.cover,
+                        child: SizedBox(
+                          width: _introC.value.size.width,
+                          height: _introC.value.size.height,
+                          child: VideoPlayer(_introC),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ] else
-                // 프리로딩/에러 화면
-                Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.black, Color(0xFF101016)],
+                ] else
+                  // 프리로딩/에러 화면
+                  Container(
+                    decoration: const BoxDecoration(color: Colors.white),
+                    child: Center(
+                      child: _error == null
+                          ? const CircularProgressIndicator()
+                          : Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Icon(
+                                  Icons.error_outline,
+                                  color: Colors.white70,
+                                  size: 36,
+                                ),
+                                SizedBox(height: 12),
+                                Text(
+                                  '결과 영상을 불러올 수 없어요.\n탭 또는 Enter로 처음으로 돌아갑니다.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ],
+                            ),
                     ),
                   ),
-                  child: Center(
-                    child: _error == null
-                        ? const CircularProgressIndicator()
-                        : Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: const [
-                              Icon(
-                                Icons.error_outline,
-                                color: Colors.white70,
-                                size: 36,
-                              ),
-                              SizedBox(height: 12),
-                              Text(
-                                '결과 영상을 불러올 수 없어요.\n탭 또는 Enter로 처음으로 돌아갑니다.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ],
-                          ),
-                  ),
-                ),
 
-              if (_error != null && Platform.isWindows)
-                const Positioned(
-                  left: 16,
-                  bottom: 24,
-                  right: 16,
-                  child: Text(
-                    '힌트: Windows 배포 시 MP4(H.264 + AAC) 권장.\n'
-                    '다른 코덱/컨테이너는 재생이 안 될 수 있어요.',
-                    style: TextStyle(color: Colors.white38, fontSize: 12),
+                // Windows 전용 힌트(웹에선 Platform 접근 금지)
+                if (_error != null && !kIsWeb && Platform.isWindows)
+                  const Positioned(
+                    left: 16,
+                    bottom: 24,
+                    right: 16,
+                    child: Text(
+                      '힌트: Windows 배포 시 MP4(H.264 + AAC) 권장.\n'
+                      '다른 코덱/컨테이너는 재생이 안 될 수 있어요.',
+                      style: TextStyle(color: Colors.white38, fontSize: 12),
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// loop 비디오 바닥 레이어 위젯 (가독성 위해 분리)
+class PositionedFillVideo extends StatelessWidget {
+  final VideoPlayerController controller;
+  const PositionedFillVideo({super.key, required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: FittedBox(
+        fit: BoxFit.cover,
+        child: SizedBox(
+          width: controller.value.size.width,
+          height: controller.value.size.height,
+          child: VideoPlayer(controller),
         ),
       ),
     );

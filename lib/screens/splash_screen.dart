@@ -1,5 +1,6 @@
+// lib/screens/splash_screen.dart
 import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb; // ✅ 추가
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -22,8 +23,11 @@ class _SplashScreenState extends State<SplashScreen> {
 
   bool _initOnce = false;
   bool _ready = false;
-  bool _showIntro = true; // 위 레이어 표시/숨김 (즉시 전환)
+  bool _showIntro = true; // 위 레이어 표시/숨김
   String? _error;
+
+  // 배경색: 초기 검정 → 루프 시작 시 흰색으로 애니 전환
+  Color _bgColor = Colors.white;
 
   @override
   void initState() {
@@ -31,14 +35,14 @@ class _SplashScreenState extends State<SplashScreen> {
 
     _introC =
         VideoPlayerController.asset(
-            'assets/videos/splash.mp4',
+            'assets/videos/splash/splash.mp4',
             videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
           )
           ..setLooping(false)
           ..addListener(_onIntroTick);
 
     _loopC = VideoPlayerController.asset(
-      'assets/videos/splash_loop.mp4',
+      'assets/videos/splash/splash_loop.mp4',
       videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
     )..setLooping(true);
 
@@ -59,9 +63,9 @@ class _SplashScreenState extends State<SplashScreen> {
       await _loopC.play();
       await _loopC.pause();
 
-      // 3) BGM 루프
+      // 3) BGM 루프 (🔉 볼륨 0.4 추천)
       await _bgm.setReleaseMode(ReleaseMode.loop);
-      await _bgm.setVolume(1.0);
+      await _bgm.setVolume(0.4);
       await _bgm.play(AssetSource('audio/bgm/splash_bgm.mp3'));
 
       setState(() => _ready = true);
@@ -86,7 +90,7 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
 
-    // 인트로가 실제로 끝남 → (1) 루프 0부터 재생 시작, (2) 인트로 즉시 숨김
+    // 인트로가 실제로 끝남 → 루프 0부터 재생 + 인트로 숨김 + 배경 흰색으로 전환
     if (!v.isPlaying && v.position >= v.duration) {
       _startLoopAndHideIntro();
     }
@@ -99,8 +103,14 @@ class _SplashScreenState extends State<SplashScreen> {
       try {
         await _introC.pause();
       } catch (_) {}
+
       if (!mounted) return;
-      setState(() => _showIntro = false); // 페이드 없음, 즉시 hide
+
+      // 배경을 검정 → 흰색으로 부드럽게 전환 (300ms)
+      setState(() {
+        _showIntro = false;
+        _bgColor = Colors.white;
+      });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -162,78 +172,79 @@ class _SplashScreenState extends State<SplashScreen> {
         autofocus: true,
         onKeyEvent: _onKeyEvent,
         child: Scaffold(
-          backgroundColor: Colors.black,
-          body: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (ready) ...[
-                // 바닥: loop (처음엔 pause 상태였고, 인트로 끝날 때부터 재생)
-                PositionedFillVideo(controller: _loopC),
-                // 위: intro (끝나면 즉시 숨김)
-                Positioned.fill(
-                  child: Visibility(
-                    visible: _showIntro,
-                    maintainState: true,
-                    maintainAnimation: true,
-                    maintainSize: true,
-                    child: FittedBox(
-                      fit: BoxFit.cover,
-                      child: SizedBox(
-                        width: _introC.value.size.width,
-                        height: _introC.value.size.height,
-                        child: VideoPlayer(_introC),
+          // 배경 전환(검정 → 흰색)을 부드럽게
+          body: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            color: _bgColor,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (ready) ...[
+                  // 바닥: loop (인트로 끝난 뒤부터 보임)
+                  PositionedFillVideo(controller: _loopC),
+
+                  // 위: intro (끝나면 숨김)
+                  Positioned.fill(
+                    child: Visibility(
+                      visible: _showIntro,
+                      maintainState: true,
+                      maintainAnimation: true,
+                      maintainSize: true,
+                      child: FittedBox(
+                        fit: BoxFit.cover,
+                        child: SizedBox(
+                          width: _introC.value.size.width,
+                          height: _introC.value.size.height,
+                          child: VideoPlayer(_introC),
+                        ),
+                      ),
+                    ),
+                  ),
+                ] else
+                  // 프리로딩 화면
+                  Container(
+                    decoration: const BoxDecoration(color: Colors.white),
+                    child: const Center(child: CircularProgressIndicator()),
+                  ),
+
+                // 에러 힌트 (Windows 전용 안내) — 웹에선 Platform 접근 금지
+                if (_error != null && !kIsWeb && Platform.isWindows)
+                  const Positioned(
+                    left: 16,
+                    bottom: 24,
+                    right: 16,
+                    child: Text(
+                      '힌트: Windows 배포 시 MP4는 H.264 + AAC 권장.\n'
+                      '다른 코덱/컨테이너는 재생이 안 될 수 있어요.',
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ),
+
+                // 터치/키 안내(선택)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 40,
+                  child: IgnorePointer(
+                    ignoring: !ready,
+                    child: Opacity(
+                      opacity: ready ? 0.9 : 0.0,
+                      child: const Center(
+                        child: Text(
+                          '탭/Enter/Space로 시작',
+                          style: TextStyle(
+                            color: Colors.black54,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ] else
-                // 프리로딩 화면
-                Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.black, Color(0xFF101016)],
-                    ),
-                  ),
-                  child: Center(
-                    child: _error == null
-                        ? const CircularProgressIndicator()
-                        : Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: const [
-                              Icon(
-                                Icons.error_outline,
-                                color: Colors.white70,
-                                size: 36,
-                              ),
-                              SizedBox(height: 12),
-                              Text(
-                                '동영상을 불러올 수 없어요.\n탭하여 계속 진행하세요.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ],
-                          ),
-                  ),
-                ),
-
-              // ✅ 웹에서는 Platform 접근 금지: kIsWeb 먼저 검사
-              if (_error != null && !kIsWeb && Platform.isWindows)
-                const Positioned(
-                  left: 16,
-                  bottom: 24,
-                  right: 16,
-                  child: Text(
-                    '힌트: Windows 배포 시 MP4는 H.264 + AAC 권장.\n'
-                    '다른 코덱/컨테이너는 재생이 안 될 수 있어요.',
-                    style: TextStyle(color: Colors.white38, fontSize: 12),
-                  ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -248,6 +259,7 @@ class PositionedFillVideo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // controller.value.isInitialized 체크는 상위에서 보장
     return Positioned.fill(
       child: FittedBox(
         fit: BoxFit.cover,
