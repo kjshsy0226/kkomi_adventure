@@ -3,12 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:audioplayers/audioplayers.dart';
 
-import '../models/fruit_enum.dart'; // Fruit
+import '../models/fruit_enum.dart';
 
-/// 리액션 상태 (기존 API와 동일)
+/// 리액션 상태
 enum KkomiMood { base, success, failure }
 
-/// 외부 제어용 컨트롤러 (기존 KkomiReactionController와 동일 API/이름 유지)
+/// 외부 제어용 컨트롤러
 class KkomiReactionController {
   _KkomiReactionVideoState? _state;
 
@@ -18,10 +18,19 @@ class KkomiReactionController {
   }
 
   void playBase() => _state?._setMood(KkomiMood.base);
+
+  /// ✅ success:
+  ///  - looping = true 상태에서 한 번 전체 재생(0→끝→0 랩어라운드 감지)
+  ///  - 다시 0으로 돌아왔을 때 pause + 0초에 정지
   Future<void> playSuccess() =>
       _state?._playAndWait(KkomiMood.success) ?? Future.value();
+
+  /// 실패: 끝까지 재생 후 base로 복귀
   Future<void> playFailure() =>
       _state?._playAndWait(KkomiMood.failure) ?? Future.value();
+
+  /// 필요 시 전체 초기화
+  Future<void> cutToBase() => _state?._cutToBase() ?? Future.value();
 
   KkomiMood? get mood => _state?._mood;
 }
@@ -29,8 +38,8 @@ class KkomiReactionController {
 /// 과일별 비디오 경로 세트
 class KkomiVideoSet {
   final String base; // 무한 루프
-  final String success; // 1회 재생 후 base 복귀
-  final String failure; // 1회 재생 후 base 복귀
+  final String success; // 단발(여기서는 loop = true 로 씀)
+  final String failure; // 단발
   const KkomiVideoSet({
     required this.base,
     required this.success,
@@ -38,7 +47,6 @@ class KkomiVideoSet {
   });
 }
 
-/// 비디오 경로 결정 함수 타입
 typedef KkomiVideoResolver = KkomiVideoSet Function(Fruit fruit);
 
 KkomiVideoSet defaultKkomiVideoResolver(Fruit fruit) {
@@ -50,8 +58,60 @@ KkomiVideoSet defaultKkomiVideoResolver(Fruit fruit) {
   );
 }
 
+/// ─────────────────────────────────────────────────────────────────────
+/// 컨트롤러 풀(캐시)
+/// ─────────────────────────────────────────────────────────────────────
+class _KkomiPool {
+  static final _KkomiPool i = _KkomiPool._();
+  _KkomiPool._();
+
+  final Map<Fruit, _Triplet> _map = {};
+
+  Future<_Triplet> get(Fruit f, KkomiVideoResolver resolve) async {
+    if (_map.containsKey(f)) return _map[f]!;
+    final set = resolve(f);
+
+    final base = VideoPlayerController.asset(set.base)..setLooping(true);
+    // ⭐ success는 loop = true 로: 한 바퀴 끝 → 다시 0으로 오는 순간 잡아낼 것
+    final succ = VideoPlayerController.asset(set.success)..setLooping(true);
+    final fail = VideoPlayerController.asset(set.failure)..setLooping(false);
+
+    await Future.wait([base.initialize(), succ.initialize(), fail.initialize()]);
+
+    // 워밍업(첫 프레임 텍스처 확보)
+    for (final c in [base, succ, fail]) {
+      await c.play();
+      await c.pause();
+      await c.seekTo(Duration.zero);
+    }
+
+    final t = _Triplet(base, succ, fail);
+    _map[f] = t;
+    return t;
+  }
+
+  Future<void> disposeAll() async {
+    final futures = <Future<void>>[];
+    for (final t in _map.values) {
+      futures.addAll([t.base.dispose(), t.succ.dispose(), t.fail.dispose()]);
+    }
+    await Future.wait(futures);
+    _map.clear();
+  }
+}
+
+class _Triplet {
+  final VideoPlayerController base, succ, fail;
+  _Triplet(this.base, this.succ, this.fail);
+}
+
 /// 1920×1080 전체 프레임 mp4를 현재 캔버스 사각형에 맞춰 그리는 위젯
-/// - base는 무한 루프, success/failure는 1회 재생 후 자동 base 복귀
+/// - base: 무한 루프
+/// - success:
+///   * loop = true
+///   * 0→(팔 올리고 내리고)→끝→0 으로 랩어라운드 되는 순간 pause
+///   * 그 상태(0초 프레임)로 정지
+/// - failure: loop = false, 끝까지 재생 후 base로 복귀
 class KkomiReactionVideo extends StatefulWidget {
   const KkomiReactionVideo({
     super.key,
@@ -60,27 +120,33 @@ class KkomiReactionVideo extends StatefulWidget {
     required this.canvasRect,
     this.resolve = defaultKkomiVideoResolver,
     this.fit = BoxFit.contain,
-    this.endSlack = const Duration(milliseconds: 120),
 
-    // ▼ SFX 옵션
+    /// 실패쪽 타임아웃 여유
+    this.endSlack = const Duration(milliseconds: 200),
+
+    // SFX 옵션
     this.successSfx = 'audio/sfx/success.wav',
     this.failureSfx = 'audio/sfx/failure.wav',
     this.sfxVolume = 0.9,
     this.enableSfx = true,
+
+    // 준비 완료 콜백(부모에서 gate용)
+    this.onReady,
   });
 
   final KkomiReactionController controller;
   final Fruit fruit;
   final Rect canvasRect;
-  final KkomiVideoResolver resolve; // 과일별 base/success/failure mp4 경로
+  final KkomiVideoResolver resolve;
   final BoxFit fit;
   final Duration endSlack;
 
-  // SFX
   final String? successSfx;
   final String? failureSfx;
-  final double sfxVolume; // 0.0 ~ 1.0
+  final double sfxVolume;
   final bool enableSfx;
+
+  final VoidCallback? onReady;
 
   @override
   State<KkomiReactionVideo> createState() => _KkomiReactionVideoState();
@@ -93,12 +159,8 @@ class _KkomiReactionVideoState extends State<KkomiReactionVideo> {
   VideoPlayerController? _successC;
   VideoPlayerController? _failureC;
 
-  VoidCallback? _succListener;
-  VoidCallback? _failListener;
-
   bool _ready = false;
 
-  // 단발 SFX 플레이어(성공/실패 공용)
   final AudioPlayer _sfxPlayer = AudioPlayer();
 
   @override
@@ -119,15 +181,13 @@ class _KkomiReactionVideoState extends State<KkomiReactionVideo> {
   @override
   void dispose() {
     widget.controller._detach(this);
-    _removeListeners();
-    _disposeAll();
-    // SFX 정리
+    _baseC = _successC = _failureC = null;
+
     _sfxPlayer.stop();
     _sfxPlayer.dispose();
     super.dispose();
   }
 
-  // 외부 제어: 무드 전환
   void _setMood(KkomiMood mood) {
     if (!mounted) return;
     setState(() => _mood = mood);
@@ -135,123 +195,156 @@ class _KkomiReactionVideoState extends State<KkomiReactionVideo> {
     _maybePlaySfxFor(mood);
   }
 
-  Future<void> _playAndWait(KkomiMood mood) async {
-    if (!mounted) return;
-    _setMood(mood);
+  /// 실패용: isCompleted 플래그로 끝까지 재생 여부 확인
+  Future<void> _waitControllerEnd(VideoPlayerController? c) async {
+    if (c == null) return;
+    if (!c.value.isInitialized) return;
+
+    if (c.value.isCompleted) return;
 
     final completer = Completer<void>();
-    final timeout = Future.delayed(const Duration(seconds: 12), () {
-      if (!completer.isCompleted) completer.complete();
+
+    final timer = Timer.periodic(const Duration(milliseconds: 30), (_) {
+      final v = c.value;
+      if (!v.isInitialized) return;
+      if (v.isCompleted) {
+        if (!completer.isCompleted) completer.complete();
+      }
     });
 
-    void poll() {
-      if (_mood == KkomiMood.base && !completer.isCompleted) {
-        completer.complete();
-      }
-    }
-
-    final ticker = Timer.periodic(
-      const Duration(milliseconds: 50),
-      (_) => poll(),
+    final timeout = Future.delayed(
+      const Duration(seconds: 12),
+      () {},
     );
+
     await Future.any([completer.future, timeout]);
-    ticker.cancel();
+    timer.cancel();
   }
 
-  // ── 과일 전환 ──────────────────────────────────────────────────────
+  /// ✅ success 한 바퀴 끝까지 재생 후, 다시 0으로 돌아왔을 때 정지
+  Future<void> _waitSuccessFirstLoop(VideoPlayerController? c) async {
+    if (c == null) return;
+    if (!c.value.isInitialized) return;
+
+    // 항상 0에서 시작하도록
+    await c.seekTo(Duration.zero);
+    if (!c.value.isPlaying) {
+      await c.play();
+    }
+
+    final completer = Completer<void>();
+    Duration? lastPos;
+
+    final timer = Timer.periodic(const Duration(milliseconds: 30), (_) async {
+      final v = c.value;
+      if (!v.isInitialized) return;
+
+      final pos = v.position;
+      final dur = v.duration;
+
+      // duration 모르면 할 수 있는 게 없으니 타임아웃에 맡김
+      if (dur == Duration.zero) {
+        lastPos = pos;
+        return;
+      }
+
+      // 랩어라운드 감지:
+      // - lastPos가 어느 정도 진행된 상태에서
+      // - pos가 갑자기 작아져서 "초반 구간"에 다시 들어오면 0으로 돌아온 것으로 판단
+      if (lastPos != null) {
+        final bool wasNearEnd =
+            lastPos! > Duration.zero &&
+            lastPos! >= dur * 0.7; // 전체의 70% 이상 진행되었었다가
+
+        final bool nowNearStart = pos <= dur * 0.2; // 다시 앞 구간으로 돌아옴
+
+        if (wasNearEnd && nowNearStart) {
+          try {
+            await c.pause();
+            await c.seekTo(Duration.zero); // 0초 프레임에서 정지
+          } catch (_) {}
+          if (!completer.isCompleted) completer.complete();
+          return;
+        }
+      }
+
+      lastPos = pos;
+    });
+
+    final timeout = Future.delayed(const Duration(seconds: 12), () {});
+    await Future.any([completer.future, timeout]);
+    timer.cancel();
+  }
+
+  Future<void> _playAndWait(KkomiMood mood) async {
+    if (!mounted) return;
+
+    _setMood(mood);
+
+    if (mood == KkomiMood.success) {
+      // ⭐ success: loop = true, 1회 재생 끝 → 다시 앞 구간으로 돌아오는 순간까지 대기
+      await _waitSuccessFirstLoop(_successC);
+      return;
+    }
+
+    if (mood == KkomiMood.failure) {
+      // 실패: 끝까지 재생 후 base로 복귀
+      await _waitControllerEnd(_failureC);
+      if (!mounted) return;
+      _setMood(KkomiMood.base);
+      return;
+    }
+
+    // base는 대기 필요 없음
+  }
+
+  Future<void> _cutToBase() async {
+    if (!_ready) return;
+    try {
+      await _sfxPlayer.stop();
+    } catch (_) {}
+
+    final all = <VideoPlayerController?>[_baseC, _successC, _failureC];
+    for (final c in all) {
+      if (c == null) continue;
+      try {
+        if (c.value.isPlaying) await c.pause();
+        if (c.value.position != Duration.zero) {
+          await c.seekTo(Duration.zero);
+        }
+      } catch (_) {}
+    }
+    _mood = KkomiMood.base;
+    if (mounted) setState(() {});
+  }
+
   Future<void> _switchFruit(Fruit f) async {
-    _removeListeners();
-    await _disposeAll();
+    _baseC = _successC = _failureC = null;
+    _ready = false;
+    if (mounted) setState(() {});
     await _initForFruit(f);
   }
 
   Future<void> _initForFruit(Fruit f) async {
-    final set = widget.resolve(f);
+    final t = await _KkomiPool.i.get(f, widget.resolve);
+    _baseC = t.base;
+    _successC = t.succ;
+    _failureC = t.fail;
 
-    _baseC = VideoPlayerController.asset(set.base)..setLooping(true);
-    _successC = VideoPlayerController.asset(set.success)..setLooping(false);
-    _failureC = VideoPlayerController.asset(set.failure)..setLooping(false);
+    if (widget.enableSfx) {
+      await _sfxPlayer.setReleaseMode(ReleaseMode.stop);
+      await _sfxPlayer.setVolume(widget.sfxVolume.clamp(0.0, 1.0));
+    }
 
-    await Future.wait([
-      _baseC!.initialize(),
-      _successC!.initialize(),
-      _failureC!.initialize(),
-    ]);
-
-    // 워밍업
-    await _baseC!.play();
-    await _baseC!.pause();
-    await _baseC!.seekTo(Duration.zero);
-    await _successC!.play();
-    await _successC!.pause();
-    await _successC!.seekTo(Duration.zero);
-    await _failureC!.play();
-    await _failureC!.pause();
-    await _failureC!.seekTo(Duration.zero);
-
-    _installEndListeners();
     _ready = true;
 
     _mood = KkomiMood.base;
-    _applyPlaybackFor(_mood);
+    await _applyPlaybackFor(_mood);
 
-    if (mounted) setState(() {});
-  }
-
-  void _installEndListeners() {
-    _removeListeners();
-
-    _succListener = () {
-      final v = _successC?.value;
-      if (v == null || !v.isInitialized) return;
-      final done =
-          v.duration > Duration.zero &&
-          (v.duration - v.position) <= widget.endSlack;
-      if (done && _mood == KkomiMood.success) {
-        _setMood(KkomiMood.base);
-      }
-    };
-    _successC?.addListener(_succListener!);
-
-    _failListener = () {
-      final v = _failureC?.value;
-      if (v == null || !v.isInitialized) return;
-      final done =
-          v.duration > Duration.zero &&
-          (v.duration - v.position) <= widget.endSlack;
-      if (done && _mood == KkomiMood.failure) {
-        _setMood(KkomiMood.base);
-      }
-    };
-    _failureC?.addListener(_failListener!);
-  }
-
-  void _removeListeners() {
-    if (_succListener != null && _successC != null) {
-      _successC!.removeListener(_succListener!);
-      _succListener = null;
+    if (mounted) {
+      widget.onReady?.call();
+      setState(() {});
     }
-    if (_failListener != null && _failureC != null) {
-      _failureC!.removeListener(_failListener!);
-      _failListener = null;
-    }
-  }
-
-  Future<void> _disposeAll() async {
-    Future<void> safeDispose(VideoPlayerController? c) async {
-      if (c == null) return;
-      try {
-        await c.dispose();
-      } catch (_) {}
-    }
-
-    await Future.wait([
-      safeDispose(_baseC),
-      safeDispose(_successC),
-      safeDispose(_failureC),
-    ]);
-    _baseC = _successC = _failureC = null;
-    _ready = false;
   }
 
   Future<void> _applyPlaybackFor(KkomiMood mood) async {
@@ -273,16 +366,13 @@ class _KkomiReactionVideoState extends State<KkomiReactionVideo> {
 
     for (final c in all) {
       if (c == null) continue;
+
       if (c == target) {
-        if (c.value.position != Duration.zero) {
-          await c.seekTo(Duration.zero);
-        }
+        // success도 여기서는 단순히 "현재 위치에서 재생"만,
+        // 실제 1회전 감시는 _waitSuccessFirstLoop에서 처리
         if (!c.value.isPlaying) await c.play();
       } else {
         if (c.value.isPlaying) await c.pause();
-        if (c.value.position != Duration.zero) {
-          await c.seekTo(Duration.zero);
-        }
       }
     }
   }
@@ -305,14 +395,9 @@ class _KkomiReactionVideoState extends State<KkomiReactionVideo> {
     if (asset == null || asset.isEmpty) return;
 
     try {
-      // 겹침 방지: 기존 재생 중이면 정지 후 재생
       await _sfxPlayer.stop();
-      await _sfxPlayer.setVolume(widget.sfxVolume.clamp(0.0, 1.0));
-      await _sfxPlayer.setReleaseMode(ReleaseMode.stop);
       await _sfxPlayer.play(AssetSource(asset));
-    } catch (_) {
-      // SFX 실패는 앱 흐름에 영향 주지 않음
-    }
+    } catch (_) {}
   }
 
   @override
@@ -325,7 +410,7 @@ class _KkomiReactionVideoState extends State<KkomiReactionVideo> {
       return FittedBox(
         fit: widget.fit,
         child: SizedBox(
-          key: UniqueKey(), // 텍스처 재사용 잔상 방지
+          key: UniqueKey(), // 텍스처 잔상 방지
           width: c.value.size.width,
           height: c.value.size.height,
           child: VideoPlayer(c),

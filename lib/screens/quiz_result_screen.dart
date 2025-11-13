@@ -26,7 +26,7 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
   bool _navigating = false;
   String? _error;
 
-  // 배경색: 초기 검정 → 루프 시작 시 흰색으로 애니 전환
+  // 배경색: 초기 흰색 → (인트로 종료 시) 흰색 유지 (필요시 검정→흰색으로 바꾸고 싶으면 초기값을 Colors.black로 바꿔)
   Color _bgColor = Colors.white;
 
   late final VoidCallback _onTick;
@@ -82,7 +82,7 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
       await _loopC.play();
       await _loopC.pause();
 
-      // 3) BGM 무한 반복 (🔉 볼륨 0.4)
+      // 3) BGM 무한 반복
       await _bgm.setReleaseMode(ReleaseMode.loop);
       await _bgm.setVolume(0.4);
       await _bgm.play(AssetSource('audio/bgm/result_bgm.mp3'));
@@ -110,7 +110,7 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
 
       if (!mounted) return;
 
-      // (3) 배경을 검정 → 흰색으로 부드럽게 전환 (300ms)
+      // (3) 배경 전환이 필요하다면 여기서 AnimatedContainer가 반영 (현재는 흰색 유지)
       setState(() {
         _showIntro = false;
         _bgColor = Colors.white;
@@ -122,7 +122,9 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
 
   @override
   void dispose() {
-    _introC.removeListener(_onTick);
+    try {
+      _introC.removeListener(_onTick);
+    } catch (_) {}
     _introC.dispose();
     _loopC.dispose();
     _bgm.stop();
@@ -183,7 +185,7 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
           body: AnimatedContainer(
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeInOut,
-            color: _bgColor, // 검정 → 흰색 전환
+            color: _bgColor,
             child: Stack(
               fit: StackFit.expand,
               children: [
@@ -211,7 +213,7 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
                 ] else
                   // 프리로딩/에러 화면
                   Container(
-                    decoration: const BoxDecoration(color: Colors.white),
+                    color: Colors.white,
                     child: Center(
                       child: _error == null
                           ? const CircularProgressIndicator()
@@ -220,7 +222,7 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
                               children: const [
                                 Icon(
                                   Icons.error_outline,
-                                  color: Colors.white70,
+                                  color: Colors.grey,
                                   size: 36,
                                 ),
                                 SizedBox(height: 12),
@@ -228,7 +230,7 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
                                   '결과 영상을 불러올 수 없어요.\n탭 또는 Enter로 처음으로 돌아갑니다.',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
-                                    color: Colors.white70,
+                                    color: Colors.grey,
                                     fontSize: 16,
                                   ),
                                 ),
@@ -246,7 +248,7 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
                     child: Text(
                       '힌트: Windows 배포 시 MP4(H.264 + AAC) 권장.\n'
                       '다른 코덱/컨테이너는 재생이 안 될 수 있어요.',
-                      style: TextStyle(color: Colors.white38, fontSize: 12),
+                      style: TextStyle(color: Colors.black38, fontSize: 12),
                     ),
                   ),
               ],
