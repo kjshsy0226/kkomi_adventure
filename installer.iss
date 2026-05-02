@@ -1,5 +1,5 @@
 ; installer.iss — Kkomi Adventure (Flutter Windows)
-#define AppName "Kkomi Adventure"
+#define AppName "Kkomi OXQuiz"
 #define AppVersion "1.0.0"
 #define Publisher "Luke"
 #define ExeName "kkomi_adventure.exe"
